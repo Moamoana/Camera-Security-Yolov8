@@ -1489,20 +1489,6 @@ SOFTWARE.
 
 ---
 
-## 📞 Support
-
-### **Documentation**
-
-- **README:** This file
-- **API Docs:** See API Documentation section
-- **Training Guide:** See Training System section
-
-### **Getting Help**
-
-- **Issues:** GitHub Issues
-- **Discussions:** GitHub Discussions
-- **Email:** support@example.com
-
 ### **FAQ**
 
 **Q: Can I use multiple ESP32-CAMs?**  
