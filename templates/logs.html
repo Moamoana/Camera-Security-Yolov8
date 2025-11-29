@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detection Logs - Security System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 5px;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-top: 10px;
+            color: white;
+            text-decoration: none;
+            opacity: 0.9;
+        }
+        
+        .back-link:hover {
+            opacity: 1;
+            text-decoration: underline;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .filters {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .filters label {
+            font-weight: 600;
+        }
+        
+        .filters select, .filters input {
+            padding: 8px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        .btn:hover {
+            background: #5568d3;
+        }
+        
+        .btn.export {
+            background: #4CAF50;
+        }
+        
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .stat-card .label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+        }
+        
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        
+        .stat-card.known .value {
+            color: #4CAF50;
+        }
+        
+        .stat-card.unknown .value {
+            color: #f44336;
+        }
+        
+        .logs-container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .logs-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .logs-table th {
+            background: #f9f9f9;
+            padding: 12px 20px;
+            text-align: left;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            font-size: 12px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        
+        .logs-table td {
+            padding: 12px 20px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .logs-table tr:hover {
+            background: #f9f9f9;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .badge.known {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .badge.unknown {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .confidence.high { color: #4CAF50; }
+        .confidence.medium { color: #ff9800; }
+        .confidence.low { color: #f44336; }
+        
+        .no-logs {
+            padding: 40px;
+            text-align: center;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>📜 Detection Logs</h1>
+            <a href="/" class="back-link">← Back to Dashboard</a>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="label">Total</div>
+                <div class="value" id="total-count">0</div>
+            </div>
+            <div class="stat-card known">
+                <div class="label">Known</div>
+                <div class="value" id="known-count">0</div>
+            </div>
+            <div class="stat-card unknown">
+                <div class="label">Unknown</div>
+                <div class="value" id="unknown-count">0</div>
+            </div>
+        </div>
+        
+        <div class="filters">
+            <div>
+                <label>Type:</label>
+                <select id="type-filter">
+                    <option value="all">All</option>
+                    <option value="unknown">Unknown</option>
+                    <option value="known">Known</option>
+                </select>
+            </div>
+            
+            <div>
+                <label>Show:</label>
+                <select id="limit-filter">
+                    <option value="50">50</option>
+                    <option value="100" selected>100</option>
+                    <option value="200">200</option>
+                </select>
+            </div>
+            
+            <button class="btn" onclick="applyFilters()">Apply</button>
+            <button class="btn export" onclick="exportLogs()">Export CSV</button>
+            <button class="btn" onclick="loadLogs()">Refresh</button>
+        </div>
+        
+        <div class="logs-container">
+            <div id="logs-content">
+                <div class="no-logs">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let allLogs = [];
+        
+        loadLogs();
+        setInterval(loadLogs, 10000);
+        
+        async function loadLogs() {
+            try {
+                const limit = document.getElementById('limit-filter').value;
+                const response = await fetch(`/api/detections?limit=${limit}`);
+                allLogs = await response.json();
+                
+                const total = allLogs.length;
+                const known = allLogs.filter(l => l.type === 'known').length;
+                const unknown = allLogs.filter(l => l.type === 'unknown').length;
+                
+                document.getElementById('total-count').textContent = total;
+                document.getElementById('known-count').textContent = known;
+                document.getElementById('unknown-count').textContent = unknown;
+                
+                applyFilters();
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+        
+        function applyFilters() {
+            const typeFilter = document.getElementById('type-filter').value;
+            let filtered = allLogs;
+            
+            if (typeFilter !== 'all') {
+                filtered = filtered.filter(log => log.type === typeFilter);
+            }
+            
+            displayLogs(filtered);
+        }
+        
+        function displayLogs(logs) {
+            if (logs.length === 0) {
+                document.getElementById('logs-content').innerHTML = '<div class="no-logs">No logs found</div>';
+                return;
+            }
+            
+            let html = '<table class="logs-table">';
+            html += '<thead><tr><th>ID</th><th>Date</th><th>Time</th><th>Type</th><th>Confidence</th></tr></thead><tbody>';
+            
+            logs.forEach(log => {
+                const confClass = log.confidence >= 0.9 ? 'high' : log.confidence >= 0.75 ? 'medium' : 'low';
+                html += '<tr>';
+                html += `<td>#${log.id}</td>`;
+                html += `<td>${log.date}</td>`;
+                html += `<td>${log.time}</td>`;
+                html += `<td><span class="badge ${log.type}">${log.type.toUpperCase()}</span></td>`;
+                html += `<td><span class="confidence ${confClass}">${(log.confidence * 100).toFixed(0)}%</span></td>`;
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table>';
+            document.getElementById('logs-content').innerHTML = html;
+        }
+        
+        function exportLogs() {
+            const typeFilter = document.getElementById('type-filter').value;
+            let filtered = typeFilter === 'all' ? allLogs : allLogs.filter(log => log.type === typeFilter);
+            
+            let csv = 'ID,Date,Time,Type,Confidence\n';
+            filtered.forEach(log => {
+                csv += `${log.id},${log.date},${log.time},${log.type},${log.confidence}\n`;
+            });
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `logs_${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+        }
+    </script>
+</body>
+</html>

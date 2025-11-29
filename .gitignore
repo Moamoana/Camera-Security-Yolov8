@@ -1,0 +1,6 @@
+/security_images/
+/dataset/
+/models/
+/runs/
+/training_data/
+*.json
