@@ -184,6 +184,17 @@
             text-align: center;
             color: #666;
         }
+
+        .person-name {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .camera-id {
+            font-size: 11px;
+            color: #999;
+            margin-left: 5px;
+        }
     </style>
 </head>
 <body>
@@ -285,15 +296,23 @@
             }
             
             let html = '<table class="logs-table">';
-            html += '<thead><tr><th>ID</th><th>Date</th><th>Time</th><th>Type</th><th>Confidence</th></tr></thead><tbody>';
+            html += '<thead><tr><th>ID</th><th>Date</th><th>Time</th><th>Type</th><th>Person/Info</th><th>Confidence</th></tr></thead><tbody>';
             
             logs.forEach(log => {
                 const confClass = log.confidence >= 0.9 ? 'high' : log.confidence >= 0.75 ? 'medium' : 'low';
+                const personInfo = log.metadata && log.metadata.person 
+                    ? `<span class="person-name">${log.metadata.person}</span>` 
+                    : log.type === 'known' ? 'Known Person' : 'Unknown';
+                const cameraInfo = log.metadata && log.metadata.camera 
+                    ? `<span class="camera-id">${log.metadata.camera}</span>` 
+                    : '';
+                
                 html += '<tr>';
                 html += `<td>#${log.id}</td>`;
                 html += `<td>${log.date}</td>`;
                 html += `<td>${log.time}</td>`;
                 html += `<td><span class="badge ${log.type}">${log.type.toUpperCase()}</span></td>`;
+                html += `<td>${personInfo}${cameraInfo}</td>`;
                 html += `<td><span class="confidence ${confClass}">${(log.confidence * 100).toFixed(0)}%</span></td>`;
                 html += '</tr>';
             });
@@ -306,9 +325,11 @@
             const typeFilter = document.getElementById('type-filter').value;
             let filtered = typeFilter === 'all' ? allLogs : allLogs.filter(log => log.type === typeFilter);
             
-            let csv = 'ID,Date,Time,Type,Confidence\n';
+            let csv = 'ID,Date,Time,Type,Person,Camera,Confidence\n';
             filtered.forEach(log => {
-                csv += `${log.id},${log.date},${log.time},${log.type},${log.confidence}\n`;
+                const person = log.metadata && log.metadata.person ? log.metadata.person : '';
+                const camera = log.metadata && log.metadata.camera ? log.metadata.camera : '';
+                csv += `${log.id},${log.date},${log.time},${log.type},${person},${camera},${log.confidence}\n`;
             });
             
             const blob = new Blob([csv], { type: 'text/csv' });

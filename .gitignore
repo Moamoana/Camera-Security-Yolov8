@@ -4,3 +4,5 @@
 /runs/
 /training_data/
 *.json
+/known_faces
+*.pyc

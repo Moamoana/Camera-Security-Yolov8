@@ -19,8 +19,8 @@
 // ============================================
 // WiFi Configuration
 // ============================================
-const char* ssid = "Abang Dias";
-const char* password = "Qian1985";
+const char* ssid = "TS0032";
+const char* password = "12345678";
 
 // ============================================
 // Camera Models

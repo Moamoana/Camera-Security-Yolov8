@@ -1,140 +1,108 @@
-"""
-Camera Manager
-Handles camera selection and switching
-"""
-
 import cv2
 import logging
-from typing import Optional, Dict, List
+import requests
 
 logger = logging.getLogger(__name__)
 
 class CameraManager:
     def __init__(self):
+        self.cameras = {}
         self.current_camera = None
         self.current_source = None
-        self.available_cameras = []
-        self.detect_cameras()
     
-    def detect_cameras(self):
-        """Detect available cameras"""
-        self.available_cameras = []
+    def detect_cameras(self, webcam_index=0, esp32_url=""):
+        self.cameras = {}
         
-        for idx in range(3):
-            cap = cv2.VideoCapture(idx)
-            if cap.isOpened():
-                ret, frame = cap.read()
-                if ret:
-                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                    
-                    self.available_cameras.append({
-                        "id": f"webcam_{idx}",
-                        "name": f"Webcam ({idx})",
-                        "type": "webcam",
-                        "source": idx,
-                        "resolution": f"{width}x{height}"
-                    })
-                cap.release()
-        
-        logger.info(f"Detected {len(self.available_cameras)} cameras")
-    
-    def add_ip_camera(self, name: str, url: str):
-        camera_id = name.lower().replace(" ", "_")
-        
-        cap = cv2.VideoCapture(url)
+        cap = cv2.VideoCapture(webcam_index, cv2.CAP_DSHOW)
         if cap.isOpened():
             ret, frame = cap.read()
             if ret:
-                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                
-                camera_info = {
-                    "id": camera_id,
-                    "name": name,
-                    "type": "ip",
-                    "source": url,
-                    "resolution": f"{width}x{height}"
+                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                self.cameras['webcam'] = {
+                    'id': 'webcam',
+                    'name': f'Webcam {webcam_index}',
+                    'type': 'webcam',
+                    'source': webcam_index,
+                    'resolution': f'{w}x{h}'
                 }
-                
-                existing = next((c for c in self.available_cameras if c["id"] == camera_id), None)
-                if existing:
-                    idx = self.available_cameras.index(existing)
-                    self.available_cameras[idx] = camera_info
-                else:
-                    self.available_cameras.append(camera_info)
-                
-                cap.release()
-                logger.info(f"Added IP camera: {name} ({url})")
-                return {"status": "success", "camera": camera_info}
             cap.release()
         
-        logger.error(f"Failed to connect to IP camera: {url}")
-        return {"error": "Failed to connect to camera"}
-    
-    def get_cameras(self) -> List[Dict]:
-        """Get list of available cameras"""
-        return self.available_cameras
-    
-    def select_camera(self, camera_id: str):
-        """Select a camera by ID"""
-        camera = next((c for c in self.available_cameras if c["id"] == camera_id), None)
+        if esp32_url:
+            try:
+                status_url = esp32_url.replace('/stream', '/status')
+                r = requests.get(status_url, timeout=2)
+                if r.status_code == 200:
+                    self.cameras['esp32'] = {
+                        'id': 'esp32',
+                        'name': 'ESP32-CAM',
+                        'type': 'esp32',
+                        'source': esp32_url,
+                        'resolution': '640x480'
+                    }
+            except:
+                pass
         
-        if not camera:
-            return {"error": "Camera not found"}
+        logger.info(f"Detected {len(self.cameras)} cameras")
+    
+    def list_all(self):
+        return list(self.cameras.values())
+    
+    def select_camera(self, camera_id):
+        if camera_id not in self.cameras:
+            return False
         
-        if self.current_camera is not None:
+        if self.current_camera:
             self.current_camera.release()
             self.current_camera = None
         
-        source = camera["source"]
-        cap = cv2.VideoCapture(source)
+        cam = self.cameras[camera_id]
+        cap = cv2.VideoCapture(cam['source'])
         
         if not cap.isOpened():
-            logger.error(f"Failed to open camera: {camera_id}")
-            return {"error": "Failed to open camera"}
+            logger.error(f"Failed to open: {camera_id}")
+            return False
         
         self.current_camera = cap
-        self.current_source = camera
-        
-        logger.info(f"Selected camera: {camera['name']}")
-        return {"status": "success", "camera": camera}
+        self.current_source = cam
+        logger.info(f"Selected: {cam['name']}")
+        return True
     
-    def get_current_camera(self) -> Optional[Dict]:
-        """Get currently selected camera"""
+    def get_current(self):
         return self.current_source
     
     def read_frame(self):
-        """Read frame from current camera"""
-        if self.current_camera is None:
+        if not self.current_camera:
             return None, None
-        
         ret, frame = self.current_camera.read()
-        if ret:
-            return True, frame
-        return False, None
+        return (True, frame) if ret else (False, None)
     
     def release(self):
-        """Release current camera"""
-        if self.current_camera is not None:
+        if self.current_camera:
             self.current_camera.release()
             self.current_camera = None
             self.current_source = None
     
-    def test_camera(self, camera_id: str):
-        """Test if a camera is accessible"""
-        camera = next((c for c in self.available_cameras if c["id"] == camera_id), None)
-        
-        if not camera:
-            return {"error": "Camera not found"}
-        
-        cap = cv2.VideoCapture(camera["source"])
+    def add_ip_camera(self, name, url):
+        camera_id = name.lower().replace(" ", "_").replace("-", "_")
+        cap = cv2.VideoCapture(url)
         if cap.isOpened():
             ret, frame = cap.read()
-            cap.release()
-            
             if ret:
-                return {"status": "ok", "message": "Camera is accessible"}
-            return {"error": "Camera opened but cannot read frames"}
-        
-        return {"error": "Cannot open camera"}
+                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                self.cameras[camera_id] = {
+                    'id': camera_id,
+                    'name': name,
+                    'type': 'ip',
+                    'source': url,
+                    'resolution': f'{w}x{h}'
+                }
+                cap.release()
+                logger.info(f"Added IP camera: {name}")
+                return {"status": "success"}
+            cap.release()
+        return {"error": "Failed to connect"}
+    
+    def get_cameras(self):
+        return list(self.cameras.values())

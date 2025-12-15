@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Testing</title>
+    <style>
+body{font-family:Arial;background:#f5f5f5;margin:0;padding:20px}
+.container{max-width:1200px;margin:0 auto;background:white;padding:20px;border-radius:10px}
+h1{color:#333}
+.controls{margin:20px 0;padding:15px;background:#f9f9f9;border-radius:5px}
+.btn{padding:10px 20px;margin:5px;border:none;border-radius:5px;cursor:pointer;font-size:14px;font-weight:600}
+.btn-start{background:#4CAF50;color:white}
+.btn-stop{background:#f44336;color:white}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin:20px 0}
+.stat-card{background:#e3f2fd;padding:15px;border-radius:8px;text-align:center}
+.stat-value{font-size:32px;font-weight:bold;color:#1976D2}
+.stat-label{font-size:14px;color:#666}
+.info{background:#fff3cd;padding:15px;border-radius:5px;margin:20px 0;border-left:4px solid #ffc107}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Model Testing</h1>
+        <a href="/" style="text-decoration:none;color:#667eea">← Back to Dashboard</a>
+        
+        <div class="info">
+            <strong>📝 Instructions:</strong><br>
+            1. Click "Start Test" below<br>
+            2. System will run detection for specified duration<br>
+            3. Walk in front of camera during test<br>
+            4. Results will show after test completes
+        </div>
+        
+        <div class="controls">
+            <label>Test Duration (seconds):</label>
+            <input type="number" id="duration" value="60" min="10" max="600">
+            <button class="btn btn-start" onclick="startTest()">▶ Start Test</button>
+            <button class="btn btn-stop" onclick="stopTest()">⏹ Stop Test</button>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="persons">0</div>
+                <div class="stat-label">Persons Detected</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="faces">0</div>
+                <div class="stat-label">Faces Recognized</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="time">0s</div>
+                <div class="stat-label">Time Elapsed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="camera">N/A</div>
+                <div class="stat-label">Camera Used</div>
+            </div>
+        </div>
+        
+        <div id="results" style="margin-top:20px"></div>
+    </div>
+
+    <script>
+let testInterval;
+let timeInterval;
+let startTime;
+
+async function startTest() {
+    const duration = parseInt(document.getElementById('duration').value);
+    
+    // Start detection system
+    try {
+        await fetch('/api/start', {method: 'POST'});
+    } catch(e) {}
+    
+    // Initialize test
+    await fetch('/api/test/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({duration: duration})
+    });
+    
+    alert(`Test started for ${duration} seconds. Stand in front of camera!`);
+    
+    startTime = Date.now();
+    testInterval = setInterval(updateResults, 1000);
+    timeInterval = setInterval(updateTime, 1000);
+    
+    setTimeout(async () => {
+        await stopTest();
+    }, duration * 1000);
+}
+
+async function stopTest() {
+    if (testInterval) {
+        clearInterval(testInterval);
+        clearInterval(timeInterval);
+    }
+    
+    await fetch('/api/test/stop', {method: 'POST'});
+    await updateResults();
+    alert('Test completed! Check results above.');
+}
+
+function updateTime() {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    document.getElementById('time').textContent = elapsed + 's';
+}
+
+async function updateResults() {
+    try {
+        const res = await fetch('/api/test/results');
+        const data = await res.json();
+        
+        document.getElementById('persons').textContent = data.persons_detected || 0;
+        document.getElementById('faces').textContent = data.faces_detected || 0;
+        document.getElementById('camera').textContent = data.camera || 'N/A';
+        
+        if (data.end_time) {
+            const results = document.getElementById('results');
+            results.innerHTML = `
+                <div style="background:#d4edda;padding:15px;border-radius:5px;border-left:4px solid #4CAF50">
+                    <h3>✅ Test Complete!</h3>
+                    <p><strong>Summary:</strong></p>
+                    <p>• Persons detected: ${data.persons_detected || 0}</p>
+                    <p>• Faces recognized: ${data.faces_detected || 0}</p>
+                    <p>• Camera: ${data.camera}</p>
+                    <p>• Duration: ${document.getElementById('duration').value}s</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error:', error);
+    }
+}
+    </script>
+</body>
+</html>

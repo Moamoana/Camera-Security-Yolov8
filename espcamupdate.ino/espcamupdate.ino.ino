@@ -19,8 +19,8 @@
 // ============================================
 // WiFi Configuration
 // ============================================
-const char* ssid = "Abang Dias";
-const char* password = "Qian1985";
+const char* ssid = "Moa";
+const char* password = "kontolbahlil";
 
 // ============================================
 // Camera Models
@@ -33,7 +33,7 @@ enum CameraModel {
   WROVER_KIT
 };
 
-// Current camera model (default: AI-Thinker)
+// Current camera model (default:  AI-Thinker)
 CameraModel currentCamera = AI_THINKER;
 
 // ============================================
@@ -51,10 +51,10 @@ const camera_config_t ai_thinker_config = {
   .pin_d6 = 34,
   .pin_d5 = 39,
   .pin_d4 = 36,
-  .pin_d3 = 21,
+  . pin_d3 = 21,
   .pin_d2 = 19,
   .pin_d1 = 18,
-  .pin_d0 = 5,
+  . pin_d0 = 5,
   .pin_vsync = 25,
   .pin_href = 23,
   .pin_pclk = 22
@@ -88,13 +88,13 @@ const camera_config_t m5stack_wide_config = {
   .pin_sscb_sda = 22,
   .pin_sscb_scl = 23,
   .pin_d7 = 19,
-  .pin_d6 = 36,
+  . pin_d6 = 36,
   .pin_d5 = 18,
-  .pin_d4 = 39,
+  . pin_d4 = 39,
   .pin_d3 = 5,
-  .pin_d2 = 34,
+  . pin_d2 = 34,
   .pin_d1 = 35,
-  .pin_d0 = 32,
+  . pin_d0 = 32,
   .pin_vsync = 25,
   .pin_href = 26,
   .pin_pclk = 21
@@ -111,10 +111,10 @@ const camera_config_t esp_eye_config = {
   .pin_d6 = 37,
   .pin_d5 = 38,
   .pin_d4 = 39,
-  .pin_d3 = 35,
+  . pin_d3 = 35,
   .pin_d2 = 14,
   .pin_d1 = 13,
-  .pin_d0 = 34,
+  . pin_d0 = 34,
   .pin_vsync = 5,
   .pin_href = 27,
   .pin_pclk = 25
@@ -129,11 +129,11 @@ const camera_config_t wrover_kit_config = {
   .pin_sscb_scl = 27,
   .pin_d7 = 35,
   .pin_d6 = 34,
-  .pin_d5 = 39,
+  . pin_d5 = 39,
   .pin_d4 = 36,
-  .pin_d3 = 19,
+  . pin_d3 = 19,
   .pin_d2 = 18,
-  .pin_d1 = 5,
+  . pin_d1 = 5,
   .pin_d0 = 4,
   .pin_vsync = 25,
   .pin_href = 23,
@@ -230,13 +230,15 @@ void loadSettings() {
 }
 
 // ============================================
-// HTTP Stream Handler
+// HTTP Stream Handler (FIXED)
 // ============================================
 void handleStream() {
   WiFiClient client = server.client();
   
   String response = "HTTP/1.1 200 OK\r\n";
-  response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
+  response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n";
+  response += "Connection: close\r\n";
+  response += "\r\n";
   server.sendContent(response);
   
   Serial.println("Stream started");
@@ -249,9 +251,11 @@ void handleStream() {
       continue;
     }
     
+    // Properly formatted MJPEG boundary
     String header = "--frame\r\n";
     header += "Content-Type: image/jpeg\r\n";
-    header += "Content-Length: " + String(fb->len) + "\r\n\r\n";
+    header += "Content-Length: " + String(fb->len) + "\r\n";
+    header += "\r\n";
     
     server.sendContent(header);
     client.write(fb->buf, fb->len);
@@ -259,7 +263,7 @@ void handleStream() {
     
     esp_camera_fb_return(fb);
     
-    if (!client.connected()) {
+    if (!client. connected()) {
       break;
     }
   }
@@ -272,8 +276,8 @@ void handleStream() {
 // ============================================
 void handleStatus() {
   String json = "{";
-  json += "\"status\":\"online\",";
-  json += "\"camera\":\"" + String(getCameraName()) + "\",";
+  json += "\"status\": \"online\",";
+  json += "\"camera\": \"" + String(getCameraName()) + "\",";
   json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
   json += "\"quality\":" + String(jpegQuality) + ",";
   json += "\"framesize\":" + String(frameSize) + ",";
@@ -335,15 +339,15 @@ void handleSettings() {
   String html = "<!DOCTYPE html><html><head>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
   html += "<style>";
-  html += "body{font-family:Arial;margin:20px;background:#f0f0f0}";
-  html += ".container{max-width:600px;margin:0 auto;background:white;padding:20px;border-radius:10px}";
+  html += "body{font-family: Arial;margin:20px;background:#f0f0f0}";
+  html += ". container{max-width:600px;margin:0 auto;background: white;padding:20px;border-radius:10px}";
   html += "h1{color:#333}";
-  html += ".setting{margin:15px 0;padding:10px;background:#f9f9f9;border-radius:5px}";
+  html += ". setting{margin:15px 0;padding:10px;background:#f9f9f9;border-radius:5px}";
   html += "label{display:block;font-weight:bold;margin-bottom:5px}";
   html += "select,input{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px}";
   html += "button{background:#4CAF50;color:white;padding:10px 20px;border:none;border-radius:5px;cursor:pointer;font-size:16px}";
   html += "button:hover{background:#45a049}";
-  html += ".info{background:#e3f2fd;padding:10px;border-radius:5px;margin:10px 0}";
+  html += ". info{background:#e3f2fd;padding:10px;border-radius:5px;margin: 10px 0}";
   html += "</style></head><body>";
   
   html += "<div class='container'>";
@@ -351,8 +355,8 @@ void handleSettings() {
   
   html += "<div class='info'>";
   html += "<strong>Current Camera:</strong> " + getCameraName() + "<br>";
-  html += "<strong>IP:</strong> " + WiFi.localIP().toString() + "<br>";
-  html += "<strong>Stream:</strong> <a href='/stream'>/stream</a>";
+  html += "<strong>IP: </strong> " + WiFi.localIP().toString() + "<br>";
+  html += "<strong>Stream: </strong> <a href='/stream'>/stream</a>";
   html += "</div>";
   
   html += "<form action='/settings' method='GET'>";
@@ -364,8 +368,8 @@ void handleSettings() {
   html += "<option value='0'" + String(currentCamera == AI_THINKER ? " selected" : "") + ">AI-Thinker</option>";
   html += "<option value='1'" + String(currentCamera == M5STACK_PSRAM ? " selected" : "") + ">M5Stack</option>";
   html += "<option value='2'" + String(currentCamera == M5STACK_WIDE ? " selected" : "") + ">M5Stack Wide</option>";
-  html += "<option value='3'" + String(currentCamera == ESP_EYE ? " selected" : "") + ">ESP Eye</option>";
-  html += "<option value='4'" + String(currentCamera == WROVER_KIT ? " selected" : "") + ">WROVER Kit</option>";
+  html += "<option value='3'" + String(currentCamera == ESP_EYE ? " selected" :  "") + ">ESP Eye</option>";
+  html += "<option value='4'" + String(currentCamera == WROVER_KIT ?  " selected" : "") + ">WROVER Kit</option>";
   html += "</select>";
   html += "</div>";
   
@@ -383,9 +387,9 @@ void handleSettings() {
   html += "<option value='6'" + String(frameSize == 6 ? " selected" : "") + ">QVGA (320x240)</option>";
   html += "<option value='7'" + String(frameSize == 7 ? " selected" : "") + ">CIF (400x296)</option>";
   html += "<option value='8'" + String(frameSize == 8 ? " selected" : "") + ">HVGA (480x320)</option>";
-  html += "<option value='10'" + String(frameSize == 10 ? " selected" : "") + ">VGA (640x480)</option>";
+  html += "<option value='10'" + String(frameSize == 10 ? " selected" :  "") + ">VGA (640x480)</option>";
   html += "<option value='11'" + String(frameSize == 11 ? " selected" : "") + ">SVGA (800x600)</option>";
-  html += "<option value='12'" + String(frameSize == 12 ? " selected" : "") + ">XGA (1024x768)</option>";
+  html += "<option value='12'" + String(frameSize == 12 ? " selected" :  "") + ">XGA (1024x768)</option>";
   html += "<option value='13'" + String(frameSize == 13 ? " selected" : "") + ">HD (1280x720)</option>";
   html += "</select>";
   html += "</div>";
@@ -400,7 +404,7 @@ void handleSettings() {
   // Contrast
   html += "<div class='setting'>";
   html += "<label>Contrast (-2 to +2):</label>";
-  html += "<input type='range' name='contrast' min='-2' max='2' value='" + String(contrast) + "' oninput='this.nextElementSibling.value=this.value'>";
+  html += "<input type='range' name='contrast' min='-2' max='2' value='" + String(contrast) + "' oninput='this.nextElementSibling.value=this. value'>";
   html += "<output>" + String(contrast) + "</output>";
   html += "</div>";
   
@@ -428,9 +432,9 @@ void handleRoot() {
   html += ".container{max-width:600px;margin:0 auto;background:white;padding:20px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}";
   html += "h1{color:#333;margin-top:0}";
   html += ".status{background:#4CAF50;color:white;padding:15px;border-radius:5px;margin:15px 0}";
-  html += ".button{display:inline-block;background:#2196F3;color:white;padding:15px 30px;margin:10px 5px;text-decoration:none;border-radius:5px;font-size:16px}";
+  html += ".button{display:inline-block;background:#2196F3;color: white;padding:15px 30px;margin:10px 5px;text-decoration:none;border-radius:5px;font-size:16px}";
   html += ".button:hover{background:#0b7dda}";
-  html += ".button.orange{background:#FF9800}";
+  html += ".button. orange{background:#FF9800}";
   html += ".button.orange:hover{background:#e68900}";
   html += ".info{background:#e3f2fd;padding:15px;border-radius:5px;margin:15px 0}";
   html += "</style></head><body>";
@@ -444,7 +448,7 @@ void handleRoot() {
   
   html += "<div class='info'>";
   html += "<strong>Camera Model:</strong> " + getCameraName() + "<br>";
-  html += "<strong>IP Address:</strong> " + WiFi.localIP().toString() + "<br>";
+  html += "<strong>IP Address:</strong> " + WiFi. localIP().toString() + "<br>";
   html += "<strong>Signal Strength:</strong> " + String(WiFi.RSSI()) + " dBm<br>";
   html += "<strong>Quality:</strong> " + String(jpegQuality) + "<br>";
   html += "<strong>Resolution:</strong> ";
@@ -481,12 +485,12 @@ void setup() {
   Serial.println("Camera Model: " + getCameraName());
   
   // Initialize camera
-  if (!initCamera()) {
+  if (! initCamera()) {
     Serial.println("Camera initialization failed!");
     Serial.println("Trying default AI-Thinker config...");
     currentCamera = AI_THINKER;
     if (!initCamera()) {
-      Serial.println("Failed again! Check your camera model selection.");
+      Serial.println("Failed again!  Check your camera model selection.");
       ESP.restart();
     }
   }

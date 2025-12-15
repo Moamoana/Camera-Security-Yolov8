@@ -1,85 +1,39 @@
-
-# ============================================
-# ESP32 CONFIGURATION
-# ============================================
-
-# ESP32-CAM (Camera)
-ESP32_CAM_IP = "192.168.1.100"
+# CAMERA SOURCES
+WEBCAM_INDEX = 0
+ESP32_CAM_IP = "172.28.209.197"
 ESP32_CAM_STREAM_URL = f"http://{ESP32_CAM_IP}/stream"
 ESP32_CAM_STATUS_URL = f"http://{ESP32_CAM_IP}/status"
 
-# ESP32 Buzzer (Alert System)
-ESP32_BUZZER_IP = "192.168.1.101"
-ESP32_BUZZER_ALERT_URL = f"http://{ESP32_BUZZER_IP}/alert"
-ESP32_BUZZER_TEST_URL = f"http://{ESP32_BUZZER_IP}/test"
-ESP32_BUZZER_STATUS_URL = f"http://{ESP32_BUZZER_IP}/status"
-
-# ============================================
-# YOLO MODEL CONFIGURATION
-# ============================================
-
+# DETECTION
 PERSON_DETECTOR_MODEL = "yolov8n.pt"
-FACE_RECOGNITION_MODEL = r".\runs\face_detection\my_face_model5\weights\best.pt"
-
-# ============================================
-# DETECTION SETTINGS
-# ============================================
-
 PERSON_CONFIDENCE = 0.75
 MIN_DETECTIONS = 5
-KNOWN_CONFIDENCE = 0.92
-ALERT_COOLDOWN = 30
-BUZZER_PATTERN = 1
-FRAME_SKIP = 5
+USE_FACE_RECOGNITION = True
+KNOWN_FACES_DIR = "known_faces"
+FACE_ENCODINGS_CACHE = "face_encodings.pkl"
+FACE_DISTANCE_THRESHOLD = 0.6
+FACE_RECOGNITION_MIN_DETECTIONS = 3
+YOLO_FACE_RECOGNITION_MODEL = r".\runs\face_detection\my_face_model5\weights\best.pt"
+
+# PROCESSING
+FRAME_SKIP = 3
 IMAGE_SIZE = 640
 
-# ============================================
-# STORAGE SETTINGS
-# ============================================
+# TELEGRAM
+TELEGRAM_ENABLED = True
+TELEGRAM_BOT_TOKEN = "8273347206:AAFpo42FcSeZD-aX6esX3vkKloYnbmLhXQ8"
+TELEGRAM_CHAT_ID = "6210129406"
+TELEGRAM_ALERT_COOLDOWN = 300
 
+# STORAGE
 IMAGES_DIR = "security_images"
-LOGS_FILE = "security_log.json"
 SAVE_IMAGES = True
-DUPLICATE_COOLDOWN_HOURS = 1
-HASH_SIMILARITY_THRESHOLD = 5
+IMAGE_ARCHIVE_HOURS = 6
+IMAGE_CLEANUP_INTERVAL_MINUTES = 30
+LOGS_FILE = "security_log.json"
+LOG_LEVEL = "INFO"
 
-# ============================================
-# FASTAPI SETTINGS
-# ============================================
-
+# SERVER
 HOST = "0.0.0.0"
 PORT = 8000
-DEBUG = False
-CORS_ORIGINS = [
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-]
-
-# ============================================
-# SYSTEM SETTINGS
-# ============================================
-
-MAX_WORKERS = 2
-STREAM_TIMEOUT = 10
-RECONNECT_DELAY = 5
-LOG_LEVEL = "INFO"
-MAX_LOG_ENTRIES = 1000
-
-# ============================================
-# FEATURE FLAGS
-# ============================================
-
-ENABLE_WEB_INTERFACE = True
-ENABLE_WEBSOCKET = True
-ENABLE_IMAGE_SAVING = True
-ENABLE_BUZZER_ALERTS = True
-ENABLE_STATISTICS = True
-
-# ============================================
-# ADVANCED SETTINGS
-# ============================================
-
-TRACK_MAX_DISTANCE = 100
-TRACK_TIMEOUT = 30
-MIN_PERSON_AREA_PERCENT = 2
-ESP32_STATUS_CHECK_INTERVAL = 60
+CORS_ORIGINS = ["*"]

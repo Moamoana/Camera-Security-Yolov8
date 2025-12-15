@@ -144,7 +144,7 @@
         .image-wrapper {
             position: relative;
             width: 100%;
-            padding-top: 75%; /* 4:3 aspect ratio */
+            padding-top: 75%;
             background: #000;
             cursor: pointer;
         }
@@ -180,11 +180,29 @@
             background: #f8d7da;
             color: #721c24;
         }
+
+        .image-badge.archived {
+            background: #fff3cd;
+            color: #856404;
+        }
         
         .image-time {
             font-size: 13px;
             color: #666;
+            margin-bottom: 5px;
+        }
+
+        .image-meta {
+            font-size: 12px;
+            color: #999;
             margin-bottom: 10px;
+        }
+
+        .person-name {
+            font-weight: 600;
+            color: #667eea;
+            font-size: 14px;
+            margin-bottom: 5px;
         }
         
         .image-actions {
@@ -229,7 +247,6 @@
             border-radius: 10px;
         }
         
-        /* Lightbox */
         .lightbox {
             display: none;
             position: fixed;
@@ -322,7 +339,6 @@
         </div>
     </div>
     
-    <!-- Lightbox -->
     <div class="lightbox" id="lightbox" onclick="closeLightbox()">
         <button class="lightbox-close">&times;</button>
         <img class="lightbox-content" id="lightbox-img">
@@ -377,6 +393,12 @@
             allImages.forEach(img => {
                 const imageUrl = `/api/images/${img.filename}`;
                 const timestamp = new Date(img.timestamp).toLocaleString();
+                const isArchived = img.location === 'archived';
+                const personName = img.metadata && img.metadata.person ? img.metadata.person : null;
+                const camera = img.metadata && img.metadata.camera ? img.metadata.camera : null;
+                const confidence = img.metadata && img.metadata.confidence 
+                    ? `${(img.metadata.confidence * 100).toFixed(0)}%` 
+                    : null;
                 
                 html += `
                     <div class="image-card">
@@ -385,7 +407,10 @@
                         </div>
                         <div class="image-info">
                             <span class="image-badge ${img.type}">${img.type.toUpperCase()}</span>
+                            ${isArchived ? '<span class="image-badge archived">ARCHIVED</span>' : ''}
+                            ${personName ? `<div class="person-name">👤 ${personName}</div>` : ''}
                             <div class="image-time">📅 ${timestamp}</div>
+                            ${camera || confidence ? `<div class="image-meta">${camera ? '📹 ' + camera : ''} ${confidence ? '📊 ' + confidence : ''}</div>` : ''}
                             <div class="image-actions">
                                 <button class="view-btn" onclick="openLightbox('${imageUrl}')">👁️ View</button>
                                 <button class="delete-btn" onclick="deleteImage('${img.filename}')">🗑️ Delete</button>

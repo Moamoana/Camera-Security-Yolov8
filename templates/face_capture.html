@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Capture - Register Person</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 900px;
+            width: 100%;
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 16px;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .step {
+            display: none;
+        }
+        
+        .step.active {
+            display: block;
+        }
+        
+        .form-group {
+            margin-bottom: 25px;
+        }
+        
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .camera-container {
+            position: relative;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        
+        #video {
+            width: 100%;
+            display: block;
+        }
+        
+        .camera-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+        }
+        
+        .face-guide {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 250px;
+            height: 300px;
+            border: 3px solid #4CAF50;
+            border-radius: 50%;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.5);
+        }
+        
+        .capture-info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 18px;
+            text-align: center;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            width: 0%;
+            transition: width 0.3s;
+        }
+        
+        .preview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .preview-image {
+            width: 100%;
+            height: 100px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 2px solid #e0e0e0;
+        }
+        
+        .btn {
+            padding: 14px 32px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: inline-block;
+            text-decoration: none;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .btn.secondary {
+            background: #6c757d;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 30px;
+        }
+        
+        .status-message {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .status-message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status-message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status-message.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .instructions {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .instructions h3 {
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+        
+        .instructions ul {
+            margin-left: 20px;
+        }
+        
+        .instructions li {
+            margin-bottom: 8px;
+            line-height: 1.6;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #667eea;
+            text-decoration: none;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>👤 Register Known Person</h1>
+            <p>Capture photos to register a new known person</p>
+        </div>
+        
+        <div class="content">
+            <!-- Step 1: Enter Name -->
+            <div class="step active" id="step1">
+                <h2 style="margin-bottom: 20px;">Step 1: Enter Person Name</h2>
+                
+                <div class="form-group">
+                    <label for="personName">Person Name</label>
+                    <input type="text" id="personName" placeholder="e.g., John Doe" autocomplete="off">
+                </div>
+                
+                <div class="instructions">
+                    <h3>Instructions:</h3>
+                    <ul>
+                        <li>We'll capture 15-20 photos automatically</li>
+                        <li>Position your face in the green circle</li>
+                        <li>Look at different angles (left, right, up, down)</li>
+                        <li>Try different expressions</li>
+                        <li>Make sure lighting is good</li>
+                    </ul>
+                </div>
+                
+                <div class="btn-group">
+                    <button class="btn" onclick="startCapture()">Start Camera</button>
+                    <a href="/train" class="btn secondary">Cancel</a>
+                </div>
+            </div>
+            
+            <!-- Step 2: Capture Photos -->
+            <div class="step" id="step2">
+                <h2 style="margin-bottom: 20px;">Step 2: Capturing Photos</h2>
+                
+                <div class="camera-container">
+                    <video id="video" autoplay playsinline></video>
+                    <div class="camera-overlay">
+                        <div class="face-guide"></div>
+                        <div class="capture-info">
+                            <div id="captureStatus">Get ready...</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressBar"></div>
+                            </div>
+                            <div id="captureCount" style="margin-top: 10px;">0 / 15 photos</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <canvas id="canvas" style="display: none;"></canvas>
+                
+                <div class="preview-grid" id="previewGrid"></div>
+                
+                <div class="btn-group">
+                    <button class="btn" id="captureBtn" onclick="toggleCapture()">Start Capturing</button>
+                    <button class="btn secondary" onclick="stopCamera()">Stop</button>
+                </div>
+            </div>
+            
+            <!-- Step 3: Processing -->
+            <div class="step" id="step3">
+                <h2 style="margin-bottom: 20px;">Step 3: Processing...</h2>
+                
+                <div class="status-message info">
+                    <p>⏳ Generating face encodings...</p>
+                    <p>This will take a few seconds.</p>
+                </div>
+            </div>
+            
+            <!-- Step 4: Complete -->
+            <div class="step" id="step4">
+                <h2 style="margin-bottom: 20px;">✅ Registration Complete!</h2>
+                
+                <div class="status-message success" id="resultMessage">
+                    <p><strong>Success!</strong></p>
+                    <p id="resultDetails"></p>
+                </div>
+                
+                <div class="btn-group">
+                    <button class="btn" onclick="location.reload()">Register Another Person</button>
+                    <a href="/train" class="btn secondary">Back to Training</a>
+                    <a href="/" class="btn secondary">Go to Dashboard</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        
+        let stream = null;
+        let capturing = false;
+        let capturedFrames = [];
+        let targetFrames = 15;
+        let personName = '';
+        let captureInterval = null;
+        
+        async function startCapture() {
+            personName = document.getElementById('personName').value.trim();
+            
+            if (!personName) {
+                alert('Please enter a person name!');
+                return;
+            }
+            
+            // Go to step 2
+            showStep(2);
+            
+            // Start camera
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: 640, 
+                        height: 480,
+                        facingMode: 'user'
+                    } 
+                });
+                video.srcObject = stream;
+                
+                // Wait for video to be ready
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                };
+            } catch (err) {
+                alert('Error accessing camera: ' + err.message);
+                showStep(1);
+            }
+        }
+        
+        function toggleCapture() {
+            if (!capturing) {
+                startAutoCapture();
+            } else {
+                stopAutoCapture();
+            }
+        }
+        
+        function startAutoCapture() {
+            capturing = true;
+            capturedFrames = [];
+            document.getElementById('captureBtn').textContent = 'Capturing...';
+            document.getElementById('captureStatus').textContent = 'Capturing photos...';
+            document.getElementById('previewGrid').innerHTML = '';
+            
+            // Capture every 300ms
+            captureInterval = setInterval(() => {
+                captureFrame();
+                
+                if (capturedFrames.length >= targetFrames) {
+                    stopAutoCapture();
+                    processCaptures();
+                }
+            }, 300);
+        }
+        
+        function stopAutoCapture() {
+            capturing = false;
+            if (captureInterval) {
+                clearInterval(captureInterval);
+            }
+            document.getElementById('captureBtn').textContent = 'Start Capturing';
+        }
+        
+        function captureFrame() {
+            // Draw video frame to canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Convert to blob
+            canvas.toBlob((blob) => {
+                capturedFrames.push(blob);
+                
+                // Update UI
+                updateProgress();
+                addPreview(blob);
+            }, 'image/jpeg', 0.95);
+        }
+        
+        function updateProgress() {
+            const progress = (capturedFrames.length / targetFrames) * 100;
+            document.getElementById('progressBar').style.width = progress + '%';
+            document.getElementById('captureCount').textContent = 
+                `${capturedFrames.length} / ${targetFrames} photos`;
+        }
+        
+        function addPreview(blob) {
+            const img = document.createElement('img');
+            img.className = 'preview-image';
+            img.src = URL.createObjectURL(blob);
+            document.getElementById('previewGrid').appendChild(img);
+        }
+        
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            showStep(1);
+        }
+        
+        async function processCaptures() {
+            // Stop camera
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            
+            // Show processing step
+            showStep(3);
+            
+            // Send to server
+            try {
+                const formData = new FormData();
+                formData.append('person_name', personName);
+                
+                capturedFrames.forEach((blob, index) => {
+                    formData.append('frames', blob, `frame_${index}.jpg`);
+                });
+                
+                const response = await fetch('/api/train/register-person', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                // Show result
+                showStep(4);
+                
+                if (result.success) {
+                    document.getElementById('resultDetails').innerHTML = 
+                        `<p>Person: <strong>${result.person_name}</strong></p>
+                         <p>Photos captured: ${result.photos_saved}</p>
+                         <p>Face encodings: ${result.encodings_added}</p>`;
+                } else {
+                    document.getElementById('resultMessage').className = 'status-message error';
+                    document.getElementById('resultMessage').innerHTML = 
+                        `<p><strong>Failed!</strong></p>
+                         <p>${result.error || 'Unknown error'}</p>`;
+                }
+            } catch (error) {
+                showStep(4);
+                document.getElementById('resultMessage').className = 'status-message error';
+                document.getElementById('resultMessage').innerHTML = 
+                    `<p><strong>Error!</strong></p>
+                     <p>${error.message}</p>`;
+            }
+        }
+        
+        function showStep(stepNumber) {
+            document.querySelectorAll('.step').forEach(step => {
+                step.classList.remove('active');
+            });
+            document.getElementById('step' + stepNumber).classList.add('active');
+        }
+    </script>
+</body>
+</html>

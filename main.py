@@ -1,10 +1,5 @@
-"""
-FastAPI Backend for Smart Security System
-Integrates ESP32-CAM, ESP32 Buzzer, and AI Detection
-"""
-
-from fastapi import FastAPI, WebSocket, HTTPException, BackgroundTasks
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi import FastAPI, WebSocket, HTTPException, BackgroundTasks, UploadFile, File, Form
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
@@ -21,10 +16,19 @@ import requests
 import numpy as np
 from pathlib import Path
 import logging
-import config
+
+try:
+    import config_new as config
+except:
+    import config
+
 from security_system import SecuritySystem
 from training_manager import TrainingManager
 from camera_manager import CameraManager
+from face_recognition_manager import FaceRecognitionManager
+from telegram_notifier import TelegramNotifier
+from image_manager import ImageManager
+from websocket_handler import CameraWebSocketHandler
 
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL),
@@ -32,15 +36,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ============================================
-# FASTAPI APP INITIALIZATION
-# ============================================
 
 app = FastAPI(
     title="Smart Security System",
-    description="AI-powered security system with ESP32 integration",
-    version="1.0.0"
+    description="AI-powered security system with face recognition",
+    version="2.0.0"
 )
+
+test_session = {
+    'running': False,
+    'start_time': None,
+    'persons_detected': 0,
+    'faces_detected': 0,
+    'detections': [],
+    'camera': None
+}
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,21 +69,59 @@ Path("templates").mkdir(exist_ok=True)
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ============================================
-# GLOBAL STATE
-# ============================================
-
 security_system: Optional[SecuritySystem] = None
 system_active = False
 connected_websockets = []
 training_manager = TrainingManager()
 camera_manager = CameraManager()
-camera_manager.add_ip_camera("ESP32-CAM", config.ESP32_CAM_STREAM_URL)
-camera_manager.select_camera("esp32-cam")
+camera_manager.detect_cameras(
+    webcam_index=config.WEBCAM_INDEX,
+    esp32_url=config.ESP32_CAM_STREAM_URL
+)
+camera_manager.select_camera('webcam')
 
-# ============================================
-# PYDANTIC MODELS
-# ============================================
+ws_handler = CameraWebSocketHandler(buffer_size=getattr(config, 'WS_FRAME_BUFFER_SIZE', 2))
+
+image_manager = ImageManager(
+    base_dir=config.IMAGES_DIR,
+    archive_hours=getattr(config, 'IMAGE_ARCHIVE_HOURS', 6),
+    cleanup_interval_minutes=getattr(config, 'IMAGE_CLEANUP_INTERVAL_MINUTES', 30)
+)
+
+face_recognizer = None
+if getattr(config, 'USE_FACE_RECOGNITION', True):
+    try:
+        face_recognizer = FaceRecognitionManager(
+            known_faces_dir=getattr(config, 'KNOWN_FACES_DIR', 'known_faces'),
+            encodings_cache=getattr(config, 'FACE_ENCODINGS_CACHE', 'face_encodings.pkl')
+        )
+        logger.info("Face recognition initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize face recognition: {e}")
+        face_recognizer = None
+
+telegram_notifier = None
+if getattr(config, 'TELEGRAM_ENABLED', False):
+    token = getattr(config, 'TELEGRAM_BOT_TOKEN', '')
+    chat_id = getattr(config, 'TELEGRAM_CHAT_ID', '')
+    if token and chat_id and token != "YOUR_BOT_TOKEN_HERE":
+        try:
+            telegram_notifier = TelegramNotifier(
+                bot_token=token,
+                chat_id=chat_id,
+                cooldown_seconds=getattr(config, 'TELEGRAM_ALERT_COOLDOWN', 300)
+            )
+            if telegram_notifier.test_connection():
+                logger.info("Telegram bot connected")
+            else:
+                telegram_notifier = None
+        except Exception as e:
+            logger.error(f"Failed to initialize Telegram: {e}")
+            telegram_notifier = None
+
+if hasattr(config, 'ESP32_CAM_STREAM_URL'):
+    camera_manager.add_ip_camera("ESP32-CAM", config.ESP32_CAM_STREAM_URL)
+    camera_manager.select_camera("esp32-cam")
 
 class SystemStatus(BaseModel):
     active: bool
@@ -103,27 +152,22 @@ class Detection(BaseModel):
     time: str
     image_path: Optional[str] = None
 
-# ============================================
-# STARTUP/SHUTDOWN EVENTS
-# ============================================
-
 @app.on_event("startup")
 async def startup_event():
-    """Initialize security system on startup"""
     global security_system
     
     logger.info("Starting Smart Security System...")
     
+    if face_recognizer:
+        known_persons = face_recognizer.get_known_persons()
+        logger.info(f"Loaded {len(known_persons)} known persons")
+    
     try:
         security_system = SecuritySystem(
-            esp32_cam_url=config.ESP32_CAM_STREAM_URL,
-            esp32_buzzer_url=config.ESP32_BUZZER_ALERT_URL,
-            face_model_path=config.FACE_RECOGNITION_MODEL,
-            person_conf=config.PERSON_CONFIDENCE,
-            known_conf=config.KNOWN_CONFIDENCE,
-            min_detections=config.MIN_DETECTIONS,
-            save_images=config.SAVE_IMAGES,
-            images_dir=config.IMAGES_DIR,
+            face_recognizer=face_recognizer,
+            telegram_notifier=telegram_notifier,
+            image_manager=image_manager,
+            ws_handler=ws_handler,
             camera_manager=camera_manager
         )
         logger.info("Security system initialized successfully")
@@ -133,7 +177,6 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup on shutdown"""
     global security_system, system_active
     
     logger.info("Shutting down Smart Security System...")
@@ -141,6 +184,9 @@ async def shutdown_event():
     if security_system and system_active:
         security_system.stop()
         system_active = False
+        
+    if image_manager:
+        image_manager.stop_cleanup_thread()
         
     for ws in connected_websockets:
         try:
@@ -150,49 +196,73 @@ async def shutdown_event():
     
     logger.info("Shutdown complete")
 
-# ============================================
-# WEB PAGES
-# ============================================
+@app.websocket("/ws/camera/{camera_id}")
+async def websocket_camera_endpoint(websocket: WebSocket, camera_id: str):
+    await ws_handler.handle_camera_connection(websocket, camera_id)
+
+@app.websocket("/ws/live/{camera_id}")
+async def websocket_live_feed(websocket: WebSocket, camera_id: str):
+    await websocket.accept()
+    
+    try:
+        while True:
+            frame_data = ws_handler.get_latest_frame(camera_id)
+            
+            if frame_data:
+                frame = frame_data['frame']
+                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                await websocket.send_bytes(buffer.tobytes())
+            
+            await asyncio.sleep(0.05)
+    
+    except:
+        pass
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    """Main dashboard page"""
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
-            "esp32_cam_ip": config.ESP32_CAM_IP,
-            "esp32_buzzer_ip": config.ESP32_BUZZER_IP
+            "esp32_cam_ip": getattr(config, 'ESP32_CAM_IP', ''),
+            "esp32_buzzer_ip": getattr(config, 'ESP32_BUZZER_IP', '')
         }
     )
 
 @app.get("/controls", response_class=HTMLResponse)
 async def controls_page(request: Request):
-    """Controls page"""
     return templates.TemplateResponse("controls.html", {"request": request})
 
 @app.get("/logs", response_class=HTMLResponse)
 async def logs_page(request: Request):
-    """Logs page"""
+    if Path("logs.html").exists():
+        return FileResponse("logs.html")
     return templates.TemplateResponse("logs.html", {"request": request})
 
 @app.get("/gallery", response_class=HTMLResponse)
 async def gallery_page(request: Request):
-    """Image gallery page"""
+    if Path("gallery.html").exists():
+        return FileResponse("gallery.html")
     return templates.TemplateResponse("gallery.html", {"request": request})
 
 @app.get("/statistics", response_class=HTMLResponse)
 async def statistics_page(request: Request):
-    """Statistics page"""
     return templates.TemplateResponse("statistics.html", {"request": request})
 
-# ============================================
-# API ENDPOINTS - SYSTEM CONTROL
-# ============================================
+@app.get("/facecapture", response_class=HTMLResponse)
+async def facecapture_page(request: Request):
+    if Path("face_capture.html").exists():
+        return FileResponse("face_capture.html")
+    return templates.TemplateResponse("face_capture.html", {"request": request})
+
+@app.get("/train", response_class=HTMLResponse)
+async def training_page(request: Request):
+    if Path("training.html").exists():
+        return FileResponse("training.html")
+    return templates.TemplateResponse("training.html", {"request": request})
 
 @app.post("/api/start")
 async def start_system(background_tasks: BackgroundTasks):
-    """Start the security system"""
     global system_active, security_system
     
     if not security_system:
@@ -209,7 +279,6 @@ async def start_system(background_tasks: BackgroundTasks):
 
 @app.post("/api/stop")
 async def stop_system():
-    """Stop the security system"""
     global system_active, security_system
     
     if not security_system:
@@ -226,252 +295,84 @@ async def stop_system():
 
 @app.get("/api/status")
 async def get_status():
-    """Get system status"""
     global security_system, system_active
     
     if not security_system:
         return {
             "active": False,
             "esp32_cam_status": "disconnected",
-            "esp32_buzzer_status": "disconnected",
+            "telegram_status": "offline",
             "error": "System not initialized"
         }
  
     stats = security_system.get_stats()
     esp32_cam_status = check_esp32_status(config.ESP32_CAM_STATUS_URL)
-    esp32_buzzer_status = check_esp32_status(config.ESP32_BUZZER_STATUS_URL)
     detections_24h = security_system.get_24h_stats()
     
     return {
         "active": system_active,
         "esp32_cam_status": esp32_cam_status,
-        "esp32_buzzer_status": esp32_buzzer_status,
-        "detections_today": stats.get('total_detections', 0),
+        "telegram_status": "connected" if telegram_notifier else "offline",
+        "detections_today": detections_24h.get('total', 0),
         "unknown_today": detections_24h.get('unknown', 0),
         "known_today": detections_24h.get('known', 0),
-        "images_saved": stats.get('images_saved', 0),
-        "false_positives_blocked": stats.get('false_positives_blocked', 0),
         "last_alert": get_last_alert_time(),
-        "uptime": stats.get('uptime', 0)
+        "uptime": stats.get('uptime', 0),
+        "cameras_connected": len(ws_handler.get_all_cameras()),
+        "known_persons": len(face_recognizer.get_known_persons()) if face_recognizer else 0,
+        "images_saved": detections_24h.get('total', 0),
+        "false_positives_blocked": 0
     }
 
-# ============================================
-# API ENDPOINTS - SETTINGS
-# ============================================
-
-@app.get("/api/settings")
-async def get_settings():
-    """Get current settings"""
-    return {
-        "person_confidence": config.PERSON_CONFIDENCE,
-        "min_detections": config.MIN_DETECTIONS,
-        "known_confidence": config.KNOWN_CONFIDENCE,
-        "alert_cooldown": config.ALERT_COOLDOWN,
-        "save_images": config.SAVE_IMAGES,
-        "frame_skip": config.FRAME_SKIP,
-        "buzzer_pattern": config.BUZZER_PATTERN
-    }
-
-@app.put("/api/settings")
-async def update_settings(settings: DetectionSettings):
-    """Update detection settings"""
+@app.get("/api/stats")
+async def get_system_stats():
     global security_system
     
     if not security_system:
         raise HTTPException(status_code=500, detail="Security system not initialized")
     
-    if settings.person_confidence is not None:
-        config.PERSON_CONFIDENCE = settings.person_confidence
-        security_system.person_conf = settings.person_confidence
+    storage_stats = image_manager.get_storage_stats() if image_manager else {}
+    ws_stats = ws_handler.get_stats()
     
-    if settings.min_detections is not None:
-        config.MIN_DETECTIONS = settings.min_detections
-        security_system.min_detections = settings.min_detections
-    
-    if settings.known_confidence is not None:
-        config.KNOWN_CONFIDENCE = settings.known_confidence
-        security_system.known_conf = settings.known_confidence
-    
-    if settings.alert_cooldown is not None:
-        config.ALERT_COOLDOWN = settings.alert_cooldown
-        security_system.alert_cooldown = settings.alert_cooldown
-    
-    if settings.save_images is not None:
-        config.SAVE_IMAGES = settings.save_images
-        security_system.save_images = settings.save_images
-    
-    logger.info(f"Settings updated: {settings}")
-    return {"status": "success", "message": "Settings updated", "settings": await get_settings()}
-
-# ============================================
-# API ENDPOINTS - ESP32 CONTROL
-# ============================================
-
-@app.post("/api/buzzer/test")
-async def test_buzzer():
-    """Test the buzzer"""
-    try:
-        response = requests.get(config.ESP32_BUZZER_TEST_URL, timeout=5)
-        if response.status_code == 200:
-            logger.info("Buzzer test successful")
-            return {"status": "success", "message": "Buzzer test successful"}
-        else:
-            raise HTTPException(status_code=500, detail="Buzzer test failed")
-    except Exception as e:
-        logger.error(f"Buzzer test failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/buzzer/alert")
-async def trigger_alert(alert: AlertRequest):
-    """Manually trigger buzzer alert"""
-    try:
-        url = f"{config.ESP32_BUZZER_ALERT_URL}?pattern={alert.pattern}"
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            logger.info(f"Manual alert triggered: pattern {alert.pattern}")
-            return {"status": "success", "message": f"Alert pattern {alert.pattern} triggered"}
-        else:
-            raise HTTPException(status_code=500, detail="Alert failed")
-    except Exception as e:
-        logger.error(f"Alert failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/esp32/status")
-async def get_esp32_status():
-    """Get ESP32 devices status"""
     return {
-        "camera": check_esp32_status(config.ESP32_CAM_STATUS_URL),
-        "buzzer": check_esp32_status(config.ESP32_BUZZER_STATUS_URL),
-        "camera_url": config.ESP32_CAM_IP,
-        "buzzer_url": config.ESP32_BUZZER_IP
+        **security_system.get_detailed_stats(),
+        "storage": storage_stats,
+        "websocket": ws_stats,
+        "known_persons": len(face_recognizer.get_known_persons()) if face_recognizer else 0
     }
-
-# ============================================
-# API ENDPOINTS - DETECTIONS & LOGS
-# ============================================
 
 @app.get("/api/detections")
 async def get_detections(limit: int = 100, type: Optional[str] = None):
-    """Get detection history"""
     global security_system
     
     if not security_system:
         return []
     
-    detections = security_system.get_detections(limit=limit, type_filter=type)
-    return detections
+    return security_system.get_detections(limit=limit, type_filter=type)
 
-@app.get("/api/detections/{detection_id}")
+@app.get("/api/detection/{detection_id}")
 async def get_detection(detection_id: int):
-    """Get specific detection"""
     global security_system
     
     if not security_system:
-        raise HTTPException(status_code=404, detail="Detection not found")
+        raise HTTPException(status_code=404, detail="Security system not initialized")
     
     detection = security_system.get_detection_by_id(detection_id)
+    
     if not detection:
         raise HTTPException(status_code=404, detail="Detection not found")
     
     return detection
 
-@app.get("/api/stats")
-async def get_statistics():
-    """Get system statistics"""
-    global security_system
-    
-    if not security_system:
-        return {}
-    
-    return security_system.get_detailed_stats()
-
-# ============================================
-# API ENDPOINTS - IMAGES
-# ============================================
-
-@app.get("/api/images")
-async def get_images(type: Optional[str] = None, limit: int = 50):
-    """Get saved images"""
-    images = []
-    
-    base_path = Path(config.IMAGES_DIR)
-
-    if type == "unknown":
-        search_paths = [base_path / "unknown"]
-    elif type == "known":
-        search_paths = [base_path / "known"]
-    else:
-        search_paths = [base_path / "unknown", base_path / "known"]
-
-    for path in search_paths:
-        if path.exists():
-            for img_file in sorted(path.glob("full_*.jpg"), reverse=True)[:limit]:
-                images.append({
-                    "filename": img_file.name,
-                    "path": str(img_file),
-                    "type": "unknown" if "unknown" in str(img_file) else "known",
-                    "timestamp": datetime.fromtimestamp(img_file.stat().st_mtime).isoformat(),
-                    "size": img_file.stat().st_size
-                })
-    
-    return images[:limit]
-
-@app.get("/api/images/{filename}")
-async def get_image(filename: str):
-    """Get a specific image file"""
-    for subdir in ["unknown", "known"]:
-        image_path = Path(config.IMAGES_DIR) / subdir / filename
-        if image_path.exists():
-            from fastapi.responses import FileResponse
-            return FileResponse(image_path)
-    
-    raise HTTPException(status_code=404, detail="Image not found")
-
-@app.delete("/api/images/{filename}")
-async def delete_image(filename: str):
-    """Delete an image"""
-    for subdir in ["unknown", "known"]:
-        full_path = Path(config.IMAGES_DIR) / subdir / filename
-        crop_path = Path(config.IMAGES_DIR) / subdir / filename.replace("full_", "crop_")
-        
-        if full_path.exists():
-            full_path.unlink()
-            if crop_path.exists():
-                crop_path.unlink()
-            logger.info(f"Deleted image: {filename}")
-            return {"status": "success", "message": "Image deleted"}
-    
-    raise HTTPException(status_code=404, detail="Image not found")
-
-# ============================================
-# STREAMING ENDPOINTS
-# ============================================
-
 @app.get("/api/stream")
 async def video_stream():
-    """Stream processed video with detection boxes"""
-    global security_system
-    if not security_system:
-        raise HTTPException(status_code=500, detail="Security system not initialized")
-    
     async def generate():
-        """Generate video frames"""
         while True:
-            frame = security_system.current_frame
-            if frame is not None:
-                ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                if ret:
-                    frame_bytes = buffer.tobytes()
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            else:
-                blank = np.zeros((480, 640, 3), dtype=np.uint8)
-                ret, buffer = cv2.imencode('.jpg', blank)
-                if ret:
-                    frame_bytes = buffer.tobytes()
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            
+            ret, frame = camera_manager.read_frame()
+            if ret and frame is not None:
+                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
             await asyncio.sleep(0.033)
     
     return StreamingResponse(
@@ -479,67 +380,84 @@ async def video_stream():
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
-# ============================================
-# WEBSOCKET ENDPOINTS
-# ============================================
-
-@app.websocket("/ws/events")
-async def websocket_events(websocket: WebSocket):
-    """WebSocket for real-time events"""
-    await websocket.accept()
-    connected_websockets.append(websocket)
+@app.post("/api/settings")
+async def update_settings(settings: DetectionSettings):
+    global security_system
     
-    try:
-        while True:
-            if security_system:
-                stats = security_system.get_stats()
-                await websocket.send_json({
-                    "type": "stats_update",
-                    "data": stats
-                })
-            
-            await asyncio.sleep(2)
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-    finally:
-        connected_websockets.remove(websocket)
+    if not security_system:
+        raise HTTPException(status_code=500, detail="Security system not initialized")
+    
+    if settings.person_confidence is not None:
+        security_system.person_conf = settings.person_confidence
+    
+    if settings.min_detections is not None:
+        security_system.min_detections = settings.min_detections
+    
+    if settings.known_confidence is not None:
+        security_system.known_conf = settings.known_confidence
+    
+    if settings.alert_cooldown is not None:
+        security_system.alert_cooldown = settings.alert_cooldown
+    
+    if settings.save_images is not None:
+        security_system.save_images = settings.save_images
+    
+    return {"status": "success", "message": "Settings updated"}
 
-# ============================================
-# TRAINING & CAMERA MANAGEMENT ENDPOINTS
-# ============================================
+@app.get("/api/images")
+async def get_images(limit: int = 50, type: str = "all"):
+    if not image_manager:
+        return []
+    return image_manager.get_images(person_type=type, limit=limit)
 
+@app.get("/api/images/{filename}")
+async def get_image(filename: str):
+    if not image_manager:
+        raise HTTPException(status_code=404, detail="Image manager not available")
+    
+    for directory in [
+        image_manager.recent_unknown,
+        image_manager.recent_known,
+        image_manager.archived_unknown,
+        image_manager.archived_known
+    ]:
+        filepath = directory / filename
+        if filepath.exists():
+            return FileResponse(filepath)
+    
+    if Path(config.IMAGES_DIR).exists():
+        for subdir in ['unknown', 'known']:
+            filepath = Path(config.IMAGES_DIR) / subdir / filename
+            if filepath.exists():
+                return FileResponse(filepath)
+    
+    raise HTTPException(status_code=404, detail="Image not found")
+
+@app.delete("/api/images/{filename}")
+async def delete_image(filename: str):
+    if not image_manager:
+        success = False
+        for subdir in ['unknown', 'known']:
+            filepath = Path(config.IMAGES_DIR) / subdir / filename
+            if filepath.exists():
+                filepath.unlink()
+                success = True
+        return {"success": success}
+    
+    success = image_manager.delete_image(filename)
+    return {"success": success}
 
 @app.get("/api/cameras")
 async def get_cameras():
-    """Get list of available cameras"""
-    return camera_manager.get_cameras()
+    cameras = camera_manager.get_cameras()
+    ws_cameras = ws_handler.get_all_cameras()
+    return {
+        "local_cameras": cameras,
+        "websocket_cameras": ws_cameras
+    }
 
-@app.post("/api/camera/select")
-async def select_camera(request: dict):
-    """Select a camera"""
-    global system_active, security_system
-    
-    camera_id = request.get("camera_id")
-    
-    if system_active and security_system:
-        security_system.stop()
-        system_active = False
-        logger.info("Stopped detection to switch camera")
-    
-    result = camera_manager.select_camera(camera_id)
-    return result
-
-@app.get("/api/camera/current")
-async def get_current_camera():
-    """Get currently selected camera"""
-    camera = camera_manager.get_current_camera()
-    if camera:
-        return camera
-    return {"id": None, "name": "None selected"}
-
-@app.post("/api/camera/add")
+@app.post("/api/cameras/add-ip")
 async def add_ip_camera(request: dict):
-    """Add IP camera"""
     name = request.get("name")
     url = request.get("url")
     
@@ -548,18 +466,68 @@ async def add_ip_camera(request: dict):
     
     return camera_manager.add_ip_camera(name, url)
 
-@app.get("/api/camera/test/{camera_id}")
-async def test_camera(camera_id: str):
-    """Test camera connection"""
-    return camera_manager.test_camera(camera_id)
+@app.post("/api/cameras/select/{camera_id}")
+async def select_camera(camera_id: str):
+    return camera_manager.select_camera(camera_id)
 
-# ---------- Data Collection ----------
+@app.get("/api/face-recognition/persons")
+async def get_known_persons():
+    if not face_recognizer:
+        return {"error": "Face recognition not available"}
+    
+    return face_recognizer.get_known_persons()
+
+@app.post("/api/face-recognition/reload")
+async def reload_face_encodings():
+    if not face_recognizer:
+        return {"error": "Face recognition not available"}
+    
+    success = face_recognizer.reload_encodings()
+    return {"success": success}
+
+@app.delete("/api/face-recognition/persons/{person_name}")
+async def delete_known_person(person_name: str):
+    if not face_recognizer:
+        return {"error": "Face recognition not available"}
+    
+    success = face_recognizer.delete_person(person_name)
+    return {"success": success}
+
+@app.post("/api/training/register-person")
+async def register_person(
+    person_name: str = Form(...),
+    frames: List[UploadFile] = File(...)
+):
+    if not face_recognizer:
+        return {"error": "Face recognition not available"}
+    
+    try:
+        temp_frames = []
+        for frame_file in frames:
+            contents = await frame_file.read()
+            nparr = np.frombuffer(contents, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if frame is not None:
+                temp_frames.append(frame)
+        
+        camera_name = camera_manager.get_current()['name'] if camera_manager.get_current() else 'Unknown'
+        result = face_recognizer.capture_and_add_person(
+            person_name=person_name,
+            frames=temp_frames,
+            camera_name=camera_name
+        )
+        
+        return result
+    
+    except Exception as e:
+        logger.error(f"Error registering person: {e}")
+        return {"error": str(e)}
 
 @app.post("/api/training/start-capture")
 async def start_capture(request: dict):
-    """Start capturing images for training"""
-    person_name = request.get("person_name")
-    camera_source = request.get("camera_source", "unknown")
+    person_name = request.get("person_name", "")
+    camera_source = request.get("camera", "current")
     auto = request.get("auto", True)
     target = request.get("target", 300)
     
@@ -570,7 +538,6 @@ async def start_capture(request: dict):
 
 @app.post("/api/training/capture-frame")
 async def capture_frame():
-    """Capture current frame from camera"""
     ret, frame = camera_manager.read_frame()
     
     if not ret or frame is None:
@@ -580,12 +547,10 @@ async def capture_frame():
 
 @app.post("/api/training/stop-capture")
 async def stop_capture():
-    """Stop capturing images"""
     return training_manager.stop_capture()
 
 @app.get("/api/training/capture-status")
 async def get_capture_status():
-    """Get current capture status"""
     return {
         "capturing": training_manager.capturing,
         "person": training_manager.capture_person,
@@ -596,19 +561,14 @@ async def get_capture_status():
 
 @app.get("/api/training/datasets")
 async def get_datasets():
-    """Get all collected datasets"""
     return training_manager.get_datasets()
 
 @app.delete("/api/training/dataset/{dataset_name}")
 async def delete_dataset(dataset_name: str):
-    """Delete a dataset"""
     return training_manager.delete_dataset(dataset_name)
-
-# ---------- Model Training ----------
 
 @app.post("/api/training/start")
 async def start_training(request: dict):
-    """Start model training"""
     model_name = request.get("model_name")
     selected_datasets = request.get("datasets", [])
     epochs = request.get("epochs", 100)
@@ -625,77 +585,26 @@ async def start_training(request: dict):
 
 @app.get("/api/training/status")
 async def get_training_status():
-    """Get training progress"""
     return training_manager.get_training_progress()
 
 @app.post("/api/training/stop")
 async def stop_training():
-    """Stop training (if possible)"""
     return training_manager.stop_training()
-
-# ---------- Model Management ----------
 
 @app.get("/api/training/models")
 async def get_models():
-    """Get all trained models"""
     return training_manager.get_models()
 
 @app.get("/api/training/model/{model_name}")
 async def get_model_info(model_name: str):
-    """Get model details"""
     return training_manager.get_model_info(model_name)
-
-@app.post("/api/training/load-model")
-async def load_model(request: dict):
-    """Load/activate a trained model"""
-    global security_system, system_active
-    
-    model_name = request.get("model_name")
-    
-    if not model_name:
-        raise HTTPException(status_code=400, detail="Model name required")
-   
-    model_path = training_manager.models_dir / model_name / "weights" / "best.pt"
-    
-    if not model_path.exists():
-        raise HTTPException(status_code=404, detail="Model not found")
-   
-    if system_active and security_system:
-        security_system.stop()
-        system_active = False
-   
-    config.FACE_RECOGNITION_MODEL = str(model_path)
-   
-    security_system = SecuritySystem(
-        esp32_cam_url=config.ESP32_CAM_STREAM_URL,
-        esp32_buzzer_url=config.ESP32_BUZZER_ALERT_URL,
-        face_model_path=str(model_path),
-        person_conf=config.PERSON_CONFIDENCE,
-        known_conf=config.KNOWN_CONFIDENCE,
-        min_detections=config.MIN_DETECTIONS,
-        save_images=config.SAVE_IMAGES,
-        images_dir=config.IMAGES_DIR,
-        camera_manager=camera_manager
-    )
-    
-    logger.info(f"Loaded model: {model_name}")
-    
-    return {
-        "status": "loaded",
-        "model": model_name,
-        "path": str(model_path)
-    }
 
 @app.delete("/api/training/model/{model_name}")
 async def delete_model(model_name: str):
-    """Delete a trained model"""
     return training_manager.delete_model(model_name)
-
-# ---------- Training Preview Stream ----------
 
 @app.get("/api/training/preview")
 async def training_preview():
-    """Stream from selected camera for training preview"""
     async def generate():
         while True:
             ret, frame = camera_manager.read_frame()
@@ -727,21 +636,173 @@ async def training_preview():
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
-# ============================================
-# WEB PAGES
-# ============================================
+@app.get("/api/cameras/list")
+async def list_cameras():
+    return camera_manager.list_all()
 
-@app.get("/train", response_class=HTMLResponse)
-async def training_page(request: Request):
-    """Training and model management page"""
-    return templates.TemplateResponse("training.html", {"request": request})
+@app.post("/api/cameras/switch")
+async def switch_camera(data: dict):
+    camera_id = data.get('camera_id')
+    success = camera_manager.select_camera(camera_id)
+    return {'success': success, 'current': camera_manager.get_current()}
 
-# ============================================
-# HELPER FUNCTIONS
-# ============================================
+@app.get("/api/cameras/current")
+async def current_camera():
+    return camera_manager.get_current() or {'name': 'None'}
+
+@app.post("/api/test/start")
+async def start_test(data: dict):
+    global test_session, system_active, security_system
+    
+    if not system_active:
+        security_system.start()
+        system_active = True
+        logger.info("Started detection for test")
+    
+    test_session = {
+        'running': True,
+        'start_time': datetime.now(),
+        'persons_detected': 0,
+        'faces_detected': 0,
+        'detections': [],
+        'camera': camera_manager.get_current()['name'] if camera_manager.get_current() else 'Unknown'
+    }
+    
+    return {'success': True, 'message': 'Test started'}
+
+@app.get("/api/test/results")
+async def get_test_results():
+    return test_session
+
+@app.post("/api/test/mark-false")
+async def mark_false_positive(data: dict):
+    detection_id = data.get('id')
+    if 'false_positives' not in test_session:
+        test_session['false_positives'] = []
+    test_session['false_positives'].append(detection_id)
+    return {'success': True}
+
+@app.post("/api/test/stop")
+async def stop_test():
+    global test_session, system_active, security_system
+    
+    test_session['running'] = False
+    test_session['end_time'] = datetime.now()
+    
+    if system_active and security_system:
+        security_system.stop()
+        system_active = False
+        logger.info("Stopped detection after test")
+    
+    return {'success': True, 'message': 'Test stopped'}
+
+@app.get("/test")
+async def test_page(request: Request):
+    global system_active, security_system
+    
+    if system_active and security_system:
+        security_system.stop()
+        system_active = False
+        logger.info("Stopped detection for model testing")
+    
+    return templates.TemplateResponse("model_test.html", {"request": request})
+
+@app.get("/face-capture")
+async def face_capture_page(request: Request):
+    global system_active, security_system
+    
+    if system_active and security_system:
+        security_system.stop()
+        system_active = False
+        logger.info("Stopped detection for face capture")
+        
+    camera_manager.release()
+    
+    return templates.TemplateResponse("face_capture.html", {"request": request})
+
+@app.post("/api/train/register-person")
+async def register_person(
+    person_name: str = Form(...),
+    frames: List[UploadFile] = File(...)
+):
+    """Register a new person by capturing their face from uploaded frames"""
+    if not face_recognizer:
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": "Face recognition not available"}
+        )
+    
+    if not person_name or not person_name.strip():
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "Person name is required"}
+        )
+    
+    person_name = person_name.strip()
+    logger.info(f"Registering person: {person_name} with {len(frames)} frames")
+    
+    # Convert uploaded files to numpy arrays
+    frame_arrays = []
+    for i, frame_file in enumerate(frames):
+        try:
+            contents = await frame_file.read()
+            logger.info(f"Frame {i}: received {len(contents)} bytes, filename={frame_file.filename}, content_type={frame_file.content_type}")
+            
+            nparr = np.frombuffer(contents, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if img is not None:
+                logger.info(f"Frame {i}: decoded to shape={img.shape}, dtype={img.dtype}")
+                frame_arrays.append(img)
+            else:
+                logger.warning(f"Failed to decode frame {i} - cv2.imdecode returned None")
+        except Exception as e:
+            logger.error(f"Error processing frame {i}: {e}")
+    
+    if not frame_arrays:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "No valid frames received"}
+        )
+    
+    # Use face recognition manager to add person
+    result = face_recognizer.capture_and_add_person(
+        person_name=person_name,
+        frames=frame_arrays,
+        camera_name="Browser Camera"
+    )
+    
+    if result.get("error"):
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": result["error"]}
+        )
+    
+    return {
+        "success": True,
+        "person_name": person_name,
+        "photos_saved": result.get("encodings_added", 0),
+        "encodings_added": result.get("encodings_added", 0),
+        "total_encodings": result.get("total_encodings", 0)
+    }
+
+@app.post("/api/telegram/test")
+async def test_telegram():
+    if not telegram_notifier:
+        return {"error": "Telegram not configured"}
+    
+    try:
+        success = telegram_notifier.send_text("🧪 Test message from Security System")
+        if success:
+            return {"message": "Telegram test sent successfully!"}
+        return {"error": "Failed to send Telegram message"}
+    except Exception as e:
+        return {"error": f"Error: {str(e)}"}
 
 def check_esp32_status(url: str) -> str:
-    """Check if ESP32 is online"""
+    if not url:
+        return "offline"
+    
     try:
         response = requests.get(url, timeout=3)
         if response.status_code == 200:
@@ -752,7 +813,6 @@ def check_esp32_status(url: str) -> str:
         return "offline"
 
 def get_last_alert_time() -> Optional[str]:
-    """Get time of last unknown person alert"""
     global security_system
     
     if not security_system:
@@ -765,7 +825,6 @@ def get_last_alert_time() -> Optional[str]:
     return None
 
 async def run_security_system():
-    """Run security system in background"""
     global security_system, system_active
     
     if not security_system:
@@ -774,25 +833,18 @@ async def run_security_system():
     
     try:
         logger.info("Starting security monitoring...")
-        import threading
-        monitoring_thread = threading.Thread(target=security_system.start, daemon=True)
-        monitoring_thread.start()
+        await security_system.run()
     except Exception as e:
         logger.error(f"Security system error: {e}")
         system_active = False
 
-# ============================================
-# MAIN
-# ============================================
-
 def main():
-    """Run FastAPI server"""
     logger.info("="*70)
     logger.info("SMART SECURITY SYSTEM - FASTAPI SERVER")
     logger.info("="*70)
-    logger.info(f"ESP32-CAM: {config.ESP32_CAM_IP}")
-    logger.info(f"ESP32 Buzzer: {config.ESP32_BUZZER_IP}")
-    logger.info(f"Face Model: {config.FACE_RECOGNITION_MODEL}")
+    logger.info(f"ESP32-CAM: {getattr(config, 'ESP32_CAM_IP', 'N/A')}")
+    logger.info(f"Face Recognition: {'Enabled' if face_recognizer else 'Disabled'}")
+    logger.info(f"Telegram: {'Enabled' if telegram_notifier else 'Disabled'}")
     logger.info(f"Web Interface: http://{config.HOST}:{config.PORT}")
     logger.info("="*70)
     
