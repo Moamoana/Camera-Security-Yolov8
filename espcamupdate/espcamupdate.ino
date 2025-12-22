@@ -9,6 +9,13 @@
  * - M5Stack Wide
  * - ESP Eye
  * - WROVER Kit
+ * 
+ * Endpoints:
+ * - /         : Home page
+ * - /stream   : MJPEG stream
+ * - /capture  : Single frame capture (for Python)
+ * - /status   : JSON status
+ * - /settings : Camera settings
  */
 
 #include "esp_camera.h"
@@ -19,8 +26,8 @@
 // ============================================
 // WiFi Configuration
 // ============================================
-const char* ssid = "TS0032";
-const char* password = "12345678";
+const char* ssid = "Abang Dias";
+const char* password = "Qian1985";
 
 // ============================================
 // Camera Models
@@ -268,6 +275,24 @@ void handleStream() {
 }
 
 // ============================================
+// Single Frame Capture Handler (FOR PYTHON)
+// ============================================
+void handleCapture() {
+  camera_fb_t *fb = esp_camera_fb_get();
+  
+  if (!fb) {
+    server.send(500, "text/plain", "Camera capture failed");
+    return;
+  }
+  
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Cache-Control", "no-cache, no-store");
+  server.send_P(200, "image/jpeg", (const char*)fb->buf, fb->len);
+  
+  esp_camera_fb_return(fb);
+}
+
+// ============================================
 // Status Handler (JSON)
 // ============================================
 void handleStatus() {
@@ -282,6 +307,7 @@ void handleStatus() {
   json += "\"rssi\":" + String(WiFi.RSSI());
   json += "}";
   
+  server.sendHeader("Access-Control-Allow-Origin", "*");
   server.send(200, "application/json", json);
 }
 
@@ -352,7 +378,8 @@ void handleSettings() {
   html += "<div class='info'>";
   html += "<strong>Current Camera:</strong> " + getCameraName() + "<br>";
   html += "<strong>IP:</strong> " + WiFi.localIP().toString() + "<br>";
-  html += "<strong>Stream:</strong> <a href='/stream'>/stream</a>";
+  html += "<strong>Stream:</strong> <a href='/stream'>/stream</a><br>";
+  html += "<strong>Capture:</strong> <a href='/capture'>/capture</a>";
   html += "</div>";
   
   html += "<form action='/settings' method='GET'>";
@@ -373,7 +400,7 @@ void handleSettings() {
   html += "<div class='setting'>";
   html += "<label>JPEG Quality (0=best, 63=worst):</label>";
   html += "<input type='range' name='quality' min='0' max='63' value='" + String(jpegQuality) + "' oninput='this.nextElementSibling.value=this.value'>";
-  html += "<output>" + String(jpegQuality) + "</output>";
+  html += "<o>" + String(jpegQuality) + "</o>";
   html += "</div>";
   
   // Frame Size
@@ -394,14 +421,14 @@ void handleSettings() {
   html += "<div class='setting'>";
   html += "<label>Brightness (-2 to +2):</label>";
   html += "<input type='range' name='brightness' min='-2' max='2' value='" + String(brightness) + "' oninput='this.nextElementSibling.value=this.value'>";
-  html += "<output>" + String(brightness) + "</output>";
+  html += "<o>" + String(brightness) + "</o>";
   html += "</div>";
   
   // Contrast
   html += "<div class='setting'>";
   html += "<label>Contrast (-2 to +2):</label>";
   html += "<input type='range' name='contrast' min='-2' max='2' value='" + String(contrast) + "' oninput='this.nextElementSibling.value=this.value'>";
-  html += "<output>" + String(contrast) + "</output>";
+  html += "<o>" + String(contrast) + "</o>";
   html += "</div>";
   
   html += "<button type='submit' name='save' value='1'>💾 Save Settings</button>";
@@ -409,7 +436,8 @@ void handleSettings() {
   
   html += "<div style='margin-top:20px'>";
   html += "<a href='/'><button style='background:#2196F3'>🏠 Home</button></a> ";
-  html += "<a href='/stream'><button style='background:#FF9800'>📹 View Stream</button></a>";
+  html += "<a href='/stream'><button style='background:#FF9800'>📹 View Stream</button></a> ";
+  html += "<a href='/capture'><button style='background:#9C27B0'>📸 Test Capture</button></a>";
   html += "</div>";
   
   html += "</div></body></html>";
@@ -432,6 +460,8 @@ void handleRoot() {
   html += ".button:hover{background:#0b7dda}";
   html += ".button.orange{background:#FF9800}";
   html += ".button.orange:hover{background:#e68900}";
+  html += ".button.purple{background:#9C27B0}";
+  html += ".button.purple:hover{background:#7B1FA2}";
   html += ".info{background:#e3f2fd;padding:15px;border-radius:5px;margin:15px 0}";
   html += "</style></head><body>";
   
@@ -460,6 +490,7 @@ void handleRoot() {
   html += "</div>";
   
   html += "<a href='/stream' class='button orange'>📹 View Stream</a>";
+  html += "<a href='/capture' class='button purple'>📸 Single Capture</a>";
   html += "<a href='/settings' class='button'>⚙️ Settings</a>";
   html += "<a href='/status' class='button'>📊 Status JSON</a>";
   
@@ -513,6 +544,9 @@ void setup() {
   Serial.print("Stream URL: http://");
   Serial.print(WiFi.localIP());
   Serial.println("/stream");
+  Serial.print("Capture URL: http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("/capture");
   Serial.print("Settings: http://");
   Serial.print(WiFi.localIP());
   Serial.println("/settings");
@@ -520,6 +554,7 @@ void setup() {
   // Setup HTTP server
   server.on("/", handleRoot);
   server.on("/stream", handleStream);
+  server.on("/capture", handleCapture);
   server.on("/status", handleStatus);
   server.on("/settings", handleSettings);
   
